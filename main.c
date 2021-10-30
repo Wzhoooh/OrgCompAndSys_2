@@ -1,165 +1,162 @@
 #include "stdio.h"
 #include "windows.h"
-#include "winuser.h"
-#include "synchapi.h"
 
-#define BACKGROUND_BLACK BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE 
+
+char* colors[] = {
+    "BLACK", 
+    "BLUE", 
+    "GREEN", 
+    "CYAN", 
+    "RED", 
+    "MAGENTA", 
+    "BROWN", 
+    "LIGHTGRAY", 
+    "DARKGRAY", 
+    "LIGHTBLUE", 
+    "LIGHTGREEN", 
+    "LIGHTCYAN", 
+    "LIGHTRED", 
+    "LIGHTMAGENTA", 
+    "YELLOW", 
+    "WHITE" 
+};
 
 typedef struct
 {
     HANDLE hbuf;
     COORD size;
-    CHAR_INFO* buf;
-    CHAR_INFO* changesBuf;
+    COORD windowPos;
+    COORD windowSize;
+    COORD outToPos;
 } Console;
 
-
-// static HANDLE hbuf;
-// static COORD screenSize;
-// static CHAR_INFO* screenBuffer;
-
-Console* initConsole(COORD size);
+Console* initConsole();
 void destroyConsole();
-BOOL isCorrectPos(Console* cons, short x, short y);
-CHAR_INFO* getCellFromBuf(Console* cons, short x, short y);
-CHAR_INFO* getCellFromChanges(Console* cons, short x, short y);
-void setCharToBuf(Console* cons, int x, int y, CHAR_INFO ch);
-void setCharToChanges(Console* cons, int x, int y, CHAR_INFO ch);
-void writeConsole(Console* cons);
+void setWindow(Console* cons, int x, int y, int sX, int sY);
+void writeCharacter(Console* cons, int x, int y, CHAR_INFO c);
+void writeString(Console* cons, const char* str, WORD attr);
+void scrollWindowUp(Console* cons);
 
-Console* initConsole(COORD size)
+Console* initConsole()
 {
     Console* cons = calloc(sizeof(Console), 1);
-    cons->size.X = size.X;
-    cons->size.Y = size.Y;
-    cons->buf = calloc(sizeof(CHAR_INFO), cons->size.X * cons->size.Y);
-    cons->changesBuf = calloc(sizeof(CHAR_INFO), cons->size.X * cons->size.Y);
-    
-    AllocConsole();
 
-    cons->hbuf = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CONSOLE_TEXTMODE_BUFFER, NULL);
+    cons->hbuf = CreateFile("CONOUT$", GENERIC_READ | GENERIC_WRITE, 0, NULL, 
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (cons->hbuf == INVALID_HANDLE_VALUE)
     {
         destroyConsole(cons);
         return NULL;
     }
-
-    if (!SetConsoleActiveScreenBuffer(cons->hbuf))
+    
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (!GetConsoleScreenBufferInfo(cons->hbuf, &info))
     {
         destroyConsole(cons);
         return NULL;
     }
+    cons->size = info.dwSize;
 
-    // CONSOLE_CURSOR_INFO cInfo = { 1, FALSE };
-    // if (!SetConsoleCursorInfo(cons->hbuf, &cInfo))
-    // {
-    //     destroyConsole(cons);
-    //     return NULL;
-    // }
-    if (!MoveWindow(GetConsoleWindow(), 0, 0, 0, 0, TRUE))
-    {
-        destroyConsole(cons);
-        return NULL;
-    }
+    setWindow(cons, 0, 0, cons->size.X, cons->size.Y);
 
-    if (!SetConsoleScreenBufferSize(cons->hbuf, cons->size))
-    {
-        destroyConsole(cons);
-        return NULL;
-    }
-
-    SMALL_RECT pos;
-    pos.Left = 0;
-    pos.Top = 0;
-    pos.Right = cons->size.X - 1;
-    pos.Bottom = cons->size.Y - 1;
-    if (!SetConsoleWindowInfo(cons->hbuf, TRUE, &pos))
-    {
-        destroyConsole(cons);
-        return NULL;
-    }
-
-    CHAR_INFO nullCh;
-    nullCh.Attributes = BACKGROUND_BLACK;
-    nullCh.Char.AsciiChar = 0;
-    for (int i = 0; i < cons->size.Y; i++)
-        for (int j = 0; j < cons->size.X; j++)
-            setCharToChanges(cons, j, i, nullCh);
-
-    writeConsole(cons);
     return cons;
 }
 
 void destroyConsole(Console* cons)
 {
-    free(cons->buf);
-    free(cons->changesBuf);
     free(cons);
 }
 
-BOOL isCorrectPos(Console* cons, short x, short y)
+void setWindow(Console* cons, int x, int y, int sX, int sY)
 {
-    return x >= 0 && x < cons->size.X && y >= 0 && y < cons->size.Y;
+    cons->windowPos.X = x;
+    cons->windowPos.Y = y;
+    cons->windowSize.X = sX;
+    cons->windowSize.Y = sY;
+    cons->outToPos.X = 0;
+    cons->outToPos.Y = 0;
 }
 
-CHAR_INFO* getCellFromBuf(Console* cons, short x, short y)
+void writeCharacter(Console* cons, int x, int y, CHAR_INFO c)
 {
-    if (isCorrectPos(cons, x, y))
-        return cons->buf + (cons->size.X * y + x);
+    if (x < 0 || y < 0 || x >= cons->windowSize.X || y >= cons->windowSize.Y)
+        return;
 
-    return NULL;
+    COORD topLeft = { 0, 0 };
+    COORD bottomRight = { 1, 1 };
+    SMALL_RECT region;
+    region.Left = x + cons->windowPos.X;
+    region.Top = y + cons->windowPos.Y;
+    region.Right = x + cons->windowPos.X;
+    region.Bottom = y + cons->windowPos.Y;
+    WriteConsoleOutput(cons->hbuf, &c, bottomRight, topLeft, &region);
 }
 
-CHAR_INFO* getCellFromChanges(Console* cons, short x, short y)
+void writeString(Console* cons, const char* str, WORD attr)
 {
-    if (isCorrectPos(cons, x, y))
-        return cons->changesBuf + (cons->size.X * y + x);
-
-    return NULL;
-}
-
-void setCharToBuf(Console* cons, int x, int y, CHAR_INFO ch)
-{
-    cons->buf[x + y * cons->size.X] = ch;
-}
-
-void setCharToChanges(Console* cons, int x, int y, CHAR_INFO ch)
-{
-    cons->changesBuf[x + y * cons->size.X] = ch;
-}
-
-void writeConsole(Console* cons)
-{
-    for (int i = 0; i < cons->size.Y; i++)
-        for (int j = 0; j < cons->size.X; j++)
+    for (const char* p = str; *p; ++p)
+    {
+        CHAR_INFO c;
+        c.Char.AsciiChar = *p;
+        c.Attributes = attr;
+        writeCharacter(cons, cons->outToPos.X, cons->outToPos.Y, c);
+        cons->outToPos.X++;
+        if (cons->outToPos.X >= cons->windowSize.X)
         {
-            CHAR_INFO cell = *getCellFromChanges(cons, j, i);
-            if (cell.Char.AsciiChar != cons->buf[j + i*cons->size.X].Char.AsciiChar)
+            cons->outToPos.X = 0;
+            cons->outToPos.Y++;
+            if (cons->outToPos.Y >= cons->windowSize.Y)
             {
-                int index = i * cons->size.X + j;
-                COORD topLeft = { 0, 0 };
-                COORD bottomRight = { 1, 1 };
-                SMALL_RECT region;
-                region.Left = j;
-                region.Top = i;
-                region.Right = j;
-                region.Bottom = i;
-                WriteConsoleOutput(cons->hbuf, cons->changesBuf+index, bottomRight,
-                                   topLeft, &region);
-                cons->buf[j + i * cons->size.X] = cell;
+                scrollWindowUp(cons);
+                cons->outToPos.Y--;
             }
         }
+    }
+}
+
+void scrollWindowUp(Console* cons)
+{
+    CHAR_INFO* buf = calloc(sizeof(CHAR_INFO), cons->windowSize.X * cons->windowSize.Y);
+    COORD topLeft = { 0, 0 };
+    COORD bottomRight = { cons->windowSize.X, cons->windowSize.Y };
+    SMALL_RECT region;
+    region.Left = cons->windowPos.X;
+    region.Top = cons->windowPos.Y + 1;
+    region.Right = cons->windowPos.X + cons->windowSize.X - 1;
+    region.Bottom = cons->windowPos.Y + cons->windowSize.Y - 1;
+    ReadConsoleOutput(cons->hbuf, buf, bottomRight, topLeft, &region);
+
+    region.Top--;
+    WriteConsoleOutput(cons->hbuf, buf, bottomRight, topLeft, &region);
+
+    for (int i = 0; i < cons->windowSize.X; i++)
+    {
+        CHAR_INFO c;
+        c.Attributes = 0;
+        c.Char.AsciiChar = ' ';
+        writeCharacter(cons, i, cons->windowSize.Y - 1, c);
+    }
 }
 
 int main()
 {
-    COORD coords = {10, 10};
-    Console* cons = initConsole(coords);
-    if (cons == NULL)
-        printf("null, %d", GetLastError());
-    else
-        printf("ok");
+    Console* cons = initConsole();
+    // setWindow(cons, 25, 5, 55 - 25 + 1, 15 - 5 + 1);
+    setWindow(cons, 25, 5, 20, 15 - 5 + 1);
+    for (int i = 0; i < 16; i++)
+        for (int j = 0; j < 16; j++)
+        {
+            WORD attr = i * 16 + j;
+            writeString(cons, colors[j], attr);
+            writeString(cons, " on ", attr);
+            writeString(cons, colors[i], attr);
 
-    Sleep(6000);
+            Sleep(600);
+        }
+
+    // writeString(cons, "qwertyuiopasdfghjkl", BACKGROUND_BLUE | FOREGROUND_RED);
+    // Sleep(3000);
+    // scrollWindowUp(cons);
+
+    Sleep(60000);
 }
