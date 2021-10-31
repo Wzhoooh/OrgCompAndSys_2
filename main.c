@@ -35,6 +35,7 @@ void destroyConsole();
 void setWindow(Console* cons, int x, int y, int sX, int sY);
 void writeCharacter(Console* cons, int x, int y, CHAR_INFO c);
 void writeString(Console* cons, const char* str, WORD attr);
+void writeNewLine(Console* cons);
 void scrollWindowUp(Console* cons);
 
 Console* initConsole()
@@ -114,6 +115,20 @@ void writeString(Console* cons, const char* str, WORD attr)
     }
 }
 
+void writeNewLine(Console* cons)
+{
+    unsigned int size = cons->windowSize.X - cons->outToPos.X;
+    char* buf = calloc(sizeof(char), size + 1);
+    for (int i = 0; i < size; i++)
+        buf[i] = ' ';
+    
+    buf[size] = '\0';
+
+    WORD attr = 0;
+    writeString(cons, buf, attr);
+    free(buf);
+}
+
 void scrollWindowUp(Console* cons)
 {
     CHAR_INFO* buf = calloc(sizeof(CHAR_INFO), cons->windowSize.X * cons->windowSize.Y);
@@ -136,13 +151,14 @@ void scrollWindowUp(Console* cons)
         c.Char.AsciiChar = ' ';
         writeCharacter(cons, i, cons->windowSize.Y - 1, c);
     }
+    free(buf);
 }
 
 int main()
 {
     Console* cons = initConsole();
-    // setWindow(cons, 25, 5, 55 - 25 + 1, 15 - 5 + 1);
-    setWindow(cons, 25, 5, 20, 15 - 5 + 1);
+    setWindow(cons, 25, 5, 55 - 25 + 1, 15 - 5 + 1);
+    // setWindow(cons, 25, 5, 20, 15 - 5 + 1);
     for (int i = 0; i < 16; i++)
         for (int j = 0; j < 16; j++)
         {
@@ -150,6 +166,8 @@ int main()
             writeString(cons, colors[j], attr);
             writeString(cons, " on ", attr);
             writeString(cons, colors[i], attr);
+            writeNewLine(cons);
+            writeNewLine(cons);
 
             Sleep(600);
         }
